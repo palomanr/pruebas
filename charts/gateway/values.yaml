@@ -469,12 +469,13 @@ database:
   enabled: true
   # A MySQL Database is configured with this Chart, set to false and set jdbcURL to use your own DB server
   # Do not use this demo database in production!!!
-  create: true
+  create: false
   # jdbcURL: jdbc:mysql://<host>:<port>/<database> | jdbc:mysql://<host>:<port>,<host>:<port>/<database>,...
   # Configurable, update the mysql.auth.<settings> if you change this and would like to use the demo database server.
+  jdbcURL: jdbc:mysql://FAM006979:3306/ssg
   username: gateway
   password: mypassword
-  name: ssg
+    #name: ssg
 
 ## If loading a TLS Key/Pair
 # This key will become the default ssl key. Can only have one.
