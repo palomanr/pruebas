@@ -1,0 +1,881 @@
+# Global values
+global:
+  portalRepository: caapim/
+  pullSecret: broadcom-apim
+  # these default to mysql settings above, change if connecting to an external database.
+  setupDemoDatabase: true
+  # A secret is created for mysql credentials
+  # If using the demo database mysql.xxx needs to match the values here
+  # By default a user called admin will be created and given admin rights
+  databaseType: mysql
+  databaseSecret: database-secret
+  # Set this to true if there is already an existing pull secret that contains the key 'mysql-password'.
+  # If **global.setupDemoDatabase** is true, ensure **mysql.auth.existingSecret** uses the same secret that contain the keys `mysql-root-password`, `mysql-replication-password`.
+  useExistingDatabaseSecret: false
+  databaseUsername: portal
+# databasePassword: 7layer
+# demoDatabaseRootPassword: 7layer
+# demoDatabaseReplicationPassword: 7layer
+  databaseHost: mysql
+  databasePort: 3306
+  databaseUseSSL: true
+  databaseRequireSSL: false
+  legacyHostnames: false
+  legacyDatabaseNames: false
+  subdomainPrefix: dev-portal
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+  podSecurityContext: {}
+  #   podSecurityContext:
+  #     fsGroup: 1001
+  #     runAsNonRoot: true
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+  containerSecurityContext: {}
+  #   containerSecurityContext:
+  #     runAsUser: 1001
+  helpPage: https://techdocs.broadcom.com/us/en/ca-enterprise-software/layer7-api-management/api-developer-portal/5-2/
+# storageClass: "_"
+# schedulerName:
+# The saas flag should be left as is unless otherwise specified by support.
+# saas: false
+
+portal:
+  domain: example.com
+  enrollNotificationEmail: noreply@mail.example.com
+  analytics:
+    enabled: true
+  # Please set analytics.replicaCount to a minimum of 2
+    aggregation: false
+  # Specify a Gateway v9.x license file via set portal.license.value
+  # This bootstraps a license to apim and pssg
+  # To renew a license toggle license.secretName and specify your new license with helm upgrade
+  # i.e portal-license becomes portal-license-1
+  # Note: a license is not required for version 5.0 and above, these fields are ignored.
+  license:
+    secretName: portal-license
+    value:
+  # Internal SSG credentials - auto-generated on install
+  internalSSG:
+    secretName: ssg-secret
+  # username: admin
+  # password: M2NlY2RhZTMyZDZkNWMyZGI3
+  # Internal password for the Portal API - auto-generated on install
+  papi:
+    secretName: papi-secret
+  # password: 7layer
+  otk:
+    port: 443
+  ssoDebug: false
+  hostnameWhitelist:
+  defaultTenantId: apim
+  # Configuration to use custom registries to pull the container images with appropriate credentials.
+  # This refers to the dockerconfigjson that contains the information about the registry and its creds.
+  registryCredentials:
+  # Set this to true if there is already an existing pull secret available.
+  useExistingPullSecret: false
+  # Set this if you would like to add an image pull secret directly to the Portal deployment.
+  imagePullSecret:
+    enabled: false
+    username:
+    password:
+
+tls:
+# Leave this blank to be auto-generated
+# For production use cases you will need to provide a public cert, cert chain and private key
+# These keys are applied to the dispatcher and APIM which have Public facing endpoints.
+# The rest are managed automatically.
+# If you're migrating from a docker swarm environment and wish to keep your old internal certificates
+# then follow the instructions here to load your certificates into secrets manually ####  https://github.com/CAAPIM/apim-charts/blob/stable/utils/portal-migration/README.md
+# The job will still run, but will not update anything.
+# During helm upgrade, ensure to set this enabled value to 'false' which prevents from recreating the certificates depending on rotate.
+# If the certificates are expired, during helm upgrade set this value to 'true' to create new certificates.
+# Behaviour of tls.job.enabled and tls.job.rotate during 'Upgrade' :
+## if tls.job.enabled is 'false', irrespective of 'tls.job.rotate' value no new certs are created.
+## if tls.job.enabled is 'true', certs are created based on the value of 'tls.job.rotate'. For 'none', no certs are created. For 'all', both internal and external certs are created.
+# Behaviour of tls.job.enabled and tls.job.rotate during 'Install' :
+## if tls.job.enabled is 'true', irrespective of 'tls.job.rotate' value, all certs are created.
+  job:
+    enabled: true
+# You may need to update the internal/external facing certificates, to do this set rotate
+# to one of the following and run the helm upgrade command.
+# Options: all, internal, external, none
+# Be sure to change it back to none afterwards to avoid certificates being rotated everytime you upgrade!
+    rotate: none
+# Change the internal/external secret name to match what you're updating.
+# These secrets are NOT Helm managed, you will need to clean them up manually.
+# This will force all of the deployments that use the secrets to upgrade
+# If you don't do this, you will have to perform a manual restart of each affected container
+  internalSecretName: portal-internal-secret
+  externalSecretName: portal-external-secret
+  useSignedCertificates: false
+# crt, crtChain and key expect files, use --set-file or add them here
+# in pem format
+# crt: |+
+#   -----BEGIN CERTIFICATE-----
+#   MIIGwTCCBamgAwIBAgIMRue5sdNe8npAkHF6MA0GCSqGSIb3DQEBCwUAMEwxCzAJ
+#   BgNVBAYTAkJFMRkwFwYDVQQKExBHbG9iYWxTaWduIG52LXNhMSIwIAYDVQQDExlB
+#   bHBoYVNTTCBDQSAtIFNIQTI1NiAtIEcyMB4XDTIwMTEwNjEwMzg1NloXDTIxMTIw
+#   RqJAZRd0jqW6yaOtQOyrMZ4XkqhZsTJSyWIN6xvoRmI47qm8dZXBLp0pD+ykD0do
+#   ..
+  crt:
+  crtChain:
+  key:
+  keyPass:
+# Set an expiry time in days for internal certificates
+# Default 3 years
+  expiryInDays: 1095
+
+# Kubernetes Ingress
+ingress:
+# Use a kubernetes/openshift ingress
+  class:
+    name: nginx
+    enabled: true
+  type:
+    kubernetes: true
+    openshift: false
+# existingSecret:
+  secretName: dispatcher-tls
+  ## Deploy an nginx-ingress controller as part of this deployment. See Subcharts section for configuration options
+  ## Using other ingress controllers will work as long as they support SSL Passthrough
+  create: true
+# Configure additional ingress controller specific annotations
+  annotations:
+    # kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+# A list of tenants that you have/will create.
+# This is for the ingress controller, it does not automatically create tenants
+  tenantIds:
+    - tenant1
+#   - tenant2
+# Added for backwards compatibility pre deprecation of this API in 1.18
+#  apiVersion: networking.k8s.io/v1beta1
+
+smtp:
+  host: notinstalled
+  port: notinstalled
+  username: notinstalled
+  password: notinstalled
+  requireSSL: false
+  cert: notinstalled
+
+telemetry:
+  plaEnabled: false
+  usageType: PRODUCTION
+  domainName:
+  siteId:
+  chargebackId:
+  proxy:
+    url:
+    username:
+    password:
+
+# Service Account for Portal services
+serviceAccount:
+  create: true
+# name:
+rbac:
+  create: true
+
+# If you want to specify resources, uncomment the cpu, memory lines and remove the curly braces
+analytics:
+  forceRedeploy: false
+  replicaCount: 1
+  image:
+    pullPolicy: IfNotPresent
+  pdb:
+    create: false
+    maxUnavailable: ""
+    minAvailable: ""
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+  podSecurityContext: {}
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+  containerSecurityContext: {}
+  resources:
+    requests: {}
+    # cpu: 100m
+    # memory: 250Mi
+    limits: {}
+    # cpu: 1000m
+    # memory: 2000Mi
+# nodeSelector: {}
+# tolerations: []
+# affinity: {}
+  additionalEnv:
+
+apim:
+  forceRedeploy: false
+  replicaCount: 1
+  image:
+    pullPolicy: IfNotPresent
+  otkDb:
+    name: otk_db
+  pdb:
+    create: false
+    maxUnavailable: ""
+    minAvailable: ""
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+  podSecurityContext: {}
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+  containerSecurityContext: {}
+  resources:
+    requests: {}
+    # cpu: 1000m
+    # memory: 4096Mi
+    limits: {}
+    # cpu: 2000m
+    # memory: 6144Mi
+# nodeSelector: {}
+# tolerations: []
+# affinity: {}
+  additionalEnv:
+
+authenticator:
+  forceRedeploy: false
+  replicaCount: 1
+  javaOptions: -Xms1g -Xmx1g
+  image:
+    pullPolicy: IfNotPresent
+  pdb:
+    create: false
+    maxUnavailable: ""
+    minAvailable: ""
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+  podSecurityContext: {}
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+  containerSecurityContext: {}
+  resources:
+    requests: {}
+    # cpu: 250m
+    # memory: 250Mi
+    limits: {}
+    # cpu: 750m
+    # memory: 1500Mi
+# nodeSelector: {}
+# tolerations: []
+# affinity: {}
+  additionalEnv:
+
+dispatcher:
+  forceRedeploy: false
+  replicaCount: 1
+  image:
+    pullPolicy: IfNotPresent
+  pdb:
+    create: false
+    maxUnavailable: ""
+    minAvailable: ""
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+  podSecurityContext: {}
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+  containerSecurityContext: {}
+  resources:
+    requests: {}
+    # cpu: 100m
+    # memory: 250Mi
+    limits: {}
+    # cpu: 500m
+    # memory: 1024Mi
+# nodeSelector: {}
+# tolerations: []
+# affinity: {}
+# If you want to specify Probe - readiness and/or liveness probe, uncomment below sections and update.
+# If none specified, default HTTP GET request is used for both readiness and liveness probe
+  # readinessProbe:
+  #   exec:
+  #     command: [sh, /opt/diagnostic/health_check.sh]
+  #   initialDelaySeconds: 90
+  #   timeoutSeconds: 1
+  #   periodSeconds: 15
+  #   successThreshold: 1
+  # livenessProbe:
+  #   httpGet:
+  #     path: /nginx_status
+  #     port: 8443
+  #     scheme: HTTPS
+  #   initialDelaySeconds: 30
+  #   timeoutSeconds: 5
+  #   periodSeconds: 15
+  #   successThreshold: 1
+  #   failureThreshold: 20
+
+# Additional Environment variables to be added to the Dispatcher Configmap
+  additionalEnv:
+## Add whitelist IP Range for Dispatcher
+#    PROBE_IP_RANGE: <iprange-in-CIDR-notation>
+#    key1: value
+
+# Additional Secret variables to be added to the Dispatcher Secret
+  additionalSecret:
+#    key1: value
+
+portalData:
+  forceRedeploy: false
+  replicaCount: 1
+  javaOptions: -Xms2048m -Xmx2048m
+  image:
+    pullPolicy: IfNotPresent
+  pdb:
+    create: false
+    maxUnavailable: ""
+    minAvailable: ""
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+  podSecurityContext: {}
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+  containerSecurityContext: {}
+  resources:
+    requests: {}
+    # cpu: 100m
+    # memory: 1500Mi
+    limits: {}
+    # cpu: 1000m
+    # memory: 3072Mi
+# nodeSelector: {}
+# tolerations: []
+# affinity: {}
+  additionalEnv:
+
+portalEnterprise:
+  forceRedeploy: false
+  replicaCount: 1
+  javaOptions: -Xms2g -Xmx2g
+  image:
+    pullPolicy: IfNotPresent
+  pdb:
+    create: false
+    maxUnavailable: ""
+    minAvailable: ""
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+  podSecurityContext: {}
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+  containerSecurityContext: {}
+  resources:
+    requests: {}
+    # cpu: 250m
+    # memory: 2300Mi
+    limits: {}
+    # cpu: 2000m
+    # memory: 3072Mi
+# nodeSelector: {}
+# tolerations: []
+# affinity: {}
+  additionalEnv:
+
+pssg:
+  forceRedeploy: false
+  replicaCount: 1
+  image:
+    pullPolicy: IfNotPresent
+  pdb:
+    create: false
+    maxUnavailable: ""
+    minAvailable: ""
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+  podSecurityContext: {}
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+  containerSecurityContext: {}
+  resources:
+    requests: {}
+    # cpu: 100m
+    # memory: 4096Mi
+    limits: {}
+    # cpu: 2000m
+    # memory: 6144Mi
+# nodeSelector: {}
+# tolerations: []
+# affinity: {}
+  additionalEnv:
+
+tenantProvisioner:
+  forceRedeploy: false
+  replicaCount: 1
+  javaOptions: -Xms512m -Xmx512m
+  image:
+    pullPolicy: IfNotPresent
+  pdb:
+    create: false
+    maxUnavailable: ""
+    minAvailable: ""
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+  podSecurityContext: {}
+  # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+  containerSecurityContext: {}
+  resources:
+    requests: {}
+    # cpu: 100m
+    # memory: 250Mi
+    limits: {}
+    # cpu: 1000m
+    # memory: 1536Mi
+# nodeSelector: {}
+# tolerations: []
+# affinity: {}
+  additionalEnv:
+
+image:
+  dispatcher: dispatcher:5.2.3
+  pssg: pssg:5.2.3
+  apim: ingress:5.2.3
+  enterprise: portal-enterprise:5.2.3
+  data: portal-data:5.2.3
+  tps: tenant-provisioning-service:5.2.3
+  analytics: analytics-server:5.2.3
+  authenticator: authenticator:5.2.3
+  dbUpgrade: db-upgrade-portal:5.2.3
+  rbacUpgrade: db-upgrade-rbac:5.2.3
+  upgradeVerify: upgrade-verify:5.2.3
+  tlsManager: tls-automator:5.2.3
+
+##
+## Subchart Configuration
+##
+
+# Settings for Druid - this is a local sub chart
+druid:
+  enabled: true
+  forceRedeploy: false
+  # Service Account for Druid services
+  serviceAccount:
+    create: true
+  # name:
+  persistence:
+    storage:
+      historical: 50Gi
+      minio: 40Gi
+      kafka: 10Gi
+      zookeeper: 10Gi
+
+  minio:
+    pdb:
+      create: false
+      maxUnavailable: ""
+      minAvailable: ""
+    # consider changing to mode... standalone/distributed.
+    # Once Portal is installed, minio can not be scaled up or down.
+    replicaCount: 1
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+    podSecurityContext: {}
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+    containerSecurityContext: {}
+    image:
+      pullPolicy: IfNotPresent
+    auth:
+      secretName: minio-secret
+    # Leave access_key and secret_key empty to auto-generate values.
+    # access_key:
+    # secret_key:
+    cloudStorage: false
+    bucketName: api-metrics
+
+## Use minio as Amazon S3 (Simple Storage Service) gateway
+## https://docs.minio.io/docs/minio-gateway-for-s3
+    s3gateway:
+      enabled: false
+      serviceEndpoint: ""
+      accessKey: ""
+      secretKey: ""
+
+## Use minio as GCS (Google Cloud Storage) gateway
+## https://docs.minio.io/docs/minio-gateway-for-gcs
+    gcsgateway:
+      enabled: false
+      # credential json file of service account key
+      gcsKeyJson: ""
+      # Google cloud project-id
+      projectId: ""
+
+## Use minio as an azure blob gateway
+## https://docs.minio.io/docs/minio-gateway-for-azure
+    azuregateway:
+      enabled: false
+
+    resources:
+      requests: {}
+      # memory: 256Mi
+      limits: {}
+      # memory: 256Mi
+  # nodeSelector: {}
+  # tolerations: []
+  # affinity: {}
+
+  zookeeper:
+    pdb:
+      create: false
+      maxUnavailable: ""
+      minAvailable: ""
+    replicaCount: 1
+    image:
+      pullPolicy: IfNotPresent
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+    podSecurityContext: {}
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+    containerSecurityContext: {}
+    resources:
+      limits: {}
+      # memory: 256Mi
+      requests: {}
+      # memory: 256Mi
+  # nodeSelector: {}
+  # tolerations: []
+  # affinity: {}
+
+  coordinator:
+    pdb:
+      create: false
+      maxUnavailable: ""
+      minAvailable: ""
+    replicaCount: 1
+    image:
+      pullPolicy: IfNotPresent
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+    podSecurityContext: {}
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+    containerSecurityContext: {}
+    resources:
+      limits: {}
+      # memory: 512Mi
+      requests: {}
+      # memory: 512Mi
+  # nodeSelector: {}
+  # tolerations: []
+  # affinity: {}
+
+  kafka:
+    pdb:
+      create: false
+      maxUnavailable: ""
+      minAvailable: ""
+    replicaCount: 1
+    image:
+      pullPolicy: IfNotPresent
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+    podSecurityContext: {}
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+    containerSecurityContext: {}
+    resources:
+      requests: {}
+      # cpu: 100m
+      # memory: 750Mi
+      limits: {}
+      # cpu: 1000m
+      # memory: 1.5Gi
+  # nodeSelector: {}
+  # tolerations: []
+  # affinity: {}
+
+  broker:
+    pdb:
+      create: false
+      maxUnavailable: ""
+      minAvailable: ""
+    replicaCount: 1
+    image:
+      pullPolicy: IfNotPresent
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+    podSecurityContext: {}
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+    containerSecurityContext: {}
+    resources:
+      requests: {}
+      # memory: 1Gi
+      limits: {}
+      # memory: 2Gi
+  # nodeSelector: {}
+  # tolerations: []
+  # affinity: {}
+
+  historical:
+    pdb:
+      create: false
+      maxUnavailable: ""
+      minAvailable: ""
+    replicaCount: 1
+    image:
+      pullPolicy: IfNotPresent
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+    podSecurityContext: {}
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+    containerSecurityContext: {}
+    resources:
+      requests: {}
+      # memory: 2Gi
+      limits: {}
+      # memory: 2Gi
+  # nodeSelector: {}
+  # tolerations: []
+  # affinity: {}
+
+  ingestion:
+    pdb:
+      create: false
+      maxUnavailable: ""
+      minAvailable: ""
+    replicaCount: 1
+    image:
+      pullPolicy: IfNotPresent
+    portName: ingestion-svc
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+    podSecurityContext: {}
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+    containerSecurityContext: {}
+    resources:
+      requests: {}
+      # cpu: 100m
+      # memory: 512Mi
+      limits: {}
+      # cpu: 1000m
+      # memory: 1.5Gi
+  # nodeSelector: {}
+  # tolerations: []
+  # affinity: {}
+
+  middlemanager:
+    pdb:
+      create: false
+      maxUnavailable: ""
+      minAvailable: ""
+    replicaCount: 1
+    image:
+      pullPolicy: IfNotPresent
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+    podSecurityContext: {}
+    # ref:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+    containerSecurityContext: {}
+    resources:
+      requests: {}
+      # memory: 4Gi
+      limits: {}
+      # memory: 4Gi
+  # nodeSelector: {}
+  # tolerations: []
+  # affinity: {}
+
+  image:
+    zookeeper: zookeeper:5.2.3
+    broker: druid:5.2.3
+    coordinator: druid:5.2.3
+    middlemanager: druid:5.2.3
+    minio: minio:5.2.3
+    historical: druid:5.2.3
+    kafka: kafka:5.2.3
+    ingestion: ingestion-server:5.2.3
+
+# Settings for RabbitMQ - https://github.com/bitnami/charts/tree/master/bitnami/rabbitmq
+rabbitmq:
+  enabled: true
+  host: rabbitmq
+  fullnameOverride: rabbitmq
+  image:
+    registry: caapim
+    repository: message-broker
+    tag: "5.2.3"
+    pullSecrets:
+      - broadcom-apim
+  pdb:
+    create: false
+    maxUnavailable: ""
+    minAvailable: ""
+  serviceAccount:
+    create: true
+  # name:
+  rbac:
+    create: true
+  persistence:
+    enabled: true
+  # size: 8Gi
+  replicaCount: 1
+## Affinity for pod assignment. Evaluated as a template
+## Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity
+## This default will ensure that additional pods are scheduled onto different nodes in your k8s cluster
+## For nodes in different availability zones, this means losing one does not impact on availability.
+# affinity: {}
+# If RabbitMQ is shut down unintentionally and is stuck in a waiting state set force boot to true
+  clustering:
+    forceBoot: false
+# MQTT Port.
+  service:
+    port: 5672
+    extraPorts:
+    - name: mqtt
+      port: 1883
+      targetPort: mqtt
+  extraContainerPorts:
+  - name: mqtt
+    containerPort: 1883
+  # podSecurityContext:
+  #   fsGroup: 1025
+  #   runAsUser: 1025
+  auth:
+    username: user
+    # creates a secret for RabbitMQ - this is a custom field
+    secretName: rabbitmq-secret
+    existingPasswordSecret: rabbitmq-secret
+    existingErlangSecret: rabbitmq-secret
+    # Set username/password if you don't them to be randomly generated or if you're using an existing RabbitMQ installation.
+  # password: 7layereyal7
+  # erlangCookie: L7Secure
+  extraPlugins: "rabbitmq_web_mqtt"
+  loadDefinition:
+    enabled: true
+    existingSecret: rabbitmq-load-definition
+  extraConfiguration: |-
+    management.load_definitions = /app/load_definition.json
+    mqtt.exchange = portal-external
+    mqtt.subscription_ttl = 86400000
+    mqtt.prefetch = 1
+    disk_free_limit.absolute = 2GB
+  resources:
+    limits: {}
+    # cpu: 1000m
+    # memory: 2Gi
+    requests: {}
+    # cpu: 1000m
+    # memory: 2Gi
+  customLivenessProbe:
+    exec:
+      command:
+        - sh
+        - -ec
+        - curl -f  --user {{ .Values.auth.username }}:$RABBITMQ_PASSWORD 127.0.0.1:{{ .Values.containerPorts.manager }}/api/health/checks/virtual-hosts
+  customReadinessProbe:
+    exec:
+      command:
+        - sh
+        - -ec
+        - curl -f  --user {{ .Values.auth.username }}:$RABBITMQ_PASSWORD 127.0.0.1:{{ .Values.containerPorts.manager }}/api/health/checks/local-alarms
+
+# Settings for Nginx-Ingress - https://github.com/kubernetes/ingress-nginx/tree/master/charts/ingress-nginx
+ingress-nginx:
+  podSecurityPolicy:
+    enabled: true
+  serviceAccount:
+    create: true
+  # name:
+  rbac:
+    create: true
+  controller:
+    config:
+      # 30MB is the max file size we allow for the custom pages and 15MB for GW Bundle.so max is set to 32
+      proxy-body-size: "32m"
+    publishService:
+      enabled: true
+    extraArgs:
+      enable-ssl-passthrough: true
+   # ingressClassResource:
+   #  name: nginx
+   #  enabled: true
+   #  default: false
+   #  controllerValue: "k8s.io/ingress-nginx"
+#  tcp:
+#    9443: "<namespace>/dispatcher:9443"
+
+# Settings for portal jobs
+jobs:
+  labels: {}
+  # nodeSelector: {}
+  # tolerations: []
+  # set default imagePullPolicy for db-upgrade-portal, db-upgrade-rbac and cert-upgrade jobs
+  image:
+    pullPolicy: IfNotPresent
+
+# We recommend that MySQL is externalised, the default implementation here is for reference only and is NOT suitable for use
+# in any production environment.
+# MySQL Stable Chart values - https://github.com/bitnami/charts/tree/master/bitnami/mysql
+mysql:
+  image:
+    tag: "8.0.36-debian-11-r4"
+  auth:
+    username: portal
+    existingSecret: database-secret
+  # primary:
+  #   podSecurityContext:
+  #     enabled: true
+  #     fsGroup: 100
+  #   containerSecurityContext:
+  #     enabled: true
+  #     runAsUser: 1001
+  initdbScripts:
+    elevate-admin.sql: |
+      GRANT ALL PRIVILEGES ON *.* TO 'portal'@'%'; FLUSH PRIVILEGES;
+  primary:
+    configuration: |-
+      [client]
+      port=3306
+      socket=/opt/bitnami/mysql/tmp/mysql.sock
+      default-character-set=utf8mb4
+      plugin_dir=/opt/bitnami/mysql/plugin
+      [mysqld]
+      default_authentication_plugin=mysql_native_password
+      skip-name-resolve
+      explicit_defaults_for_timestamp
+      basedir=/opt/bitnami/mysql
+      plugin_dir=/opt/bitnami/mysql/plugin
+      port=3306
+      socket=/opt/bitnami/mysql/tmp/mysql.sock
+      datadir=/bitnami/mysql/data
+      tmpdir=/opt/bitnami/mysql/tmp
+      collation-server=utf8mb4_0900_ai_ci
+      character-set-server=utf8mb4
+      innodb_log_buffer_size=32M
+      innodb_log_file_size=80M
+      max_allowed_packet=8M
+      group_concat_max_len=512000
+      sql_mode = "STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+      bind-address=0.0.0.0
+      pid-file=/opt/bitnami/mysql/tmp/mysqld.pid
+      log-error=/opt/bitnami/mysql/logs/mysqld.log
+      [manager]
+      port=3306
+      socket=/opt/bitnami/mysql/tmp/mysql.sock
+      pid-file=/opt/bitnami/mysql/tmp/mysqld.pid
+    pdb:
+      create: false
+      maxUnavailable: ""
+      minAvailable: ""
+    persistence:
+      annotations:
+        helm.sh/hook: pre-install
+        helm.sh/hook-weight: "-10"
+  commonAnnotations:
+    helm.sh/hook: pre-install
+    helm.sh/hook-weight: "-10"

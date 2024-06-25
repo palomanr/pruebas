@@ -1,0 +1,736 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ template "gateway.fullname" . }}
+  labels:
+    app: {{ template "gateway.name" . }}
+    chart: {{ template "gateway.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    {{- range $key, $val := .Values.additionalLabels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+  {{- if  .Values.additionalAnnotations }}
+  annotations:
+{{- range $key, $val := .Values.additionalAnnotations }}
+    {{ $key }}: "{{ $val }}"
+{{- end }}
+{{- end }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ template "gateway.fullname" . }}
+  replicas: {{ .Values.replicas }}
+  strategy:
+{{ toYaml .Values.updateStrategy | indent 4 }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "gateway.fullname" . }}
+        release: {{ .Release.Name }}
+    {{- if  .Values.podLabels }}
+        {{- toYaml .Values.podLabels | nindent 8 }}
+    {{- end }}
+    {{- if  .Values.podAnnotations }}
+      annotations: {{- toYaml .Values.podAnnotations | nindent 8 }}
+    {{- if .Values.restartOnConfigChange }}
+    {{- if .Values.restartOnConfigChange.enabled }}
+        checksum/config: {{ include ( print  $.Template.BasePath "/configmap.yaml" ) $ | sha256sum }}
+    {{- end }}
+    {{- end }}
+    {{- end }}
+    {{- if not .Values.podAnnotations }}
+     {{- if .Values.restartOnConfigChange }}
+     {{- if .Values.restartOnConfigChange.enabled }}
+      annotations:
+         checksum/config: {{ include ( print  $.Template.BasePath "/configmap.yaml" ) $ | sha256sum }}
+     {{- end }}
+     {{- end }}
+    {{- end }}
+    spec:
+      serviceAccountName: {{ include "gateway.serviceAccountName" . }}
+      {{- if .Values.affinity }}
+      affinity: {{- toYaml .Values.affinity | nindent 12 }}
+      {{- end }}
+      {{- if .Values.tolerations }}
+      tolerations: {{- toYaml .Values.tolerations | nindent 12 }}
+      {{- end }}
+      {{- if .Values.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- toYaml .Values.topologySpreadConstraints | nindent 12 }}
+      {{- end }}
+      {{- if .Values.podSecurityContext }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 12 }}
+      {{- end }}
+      {{- if .Values.nodeSelector }}
+      nodeSelector: {{- toYaml .Values.nodeSelector | nindent 12 }}
+      {{- end }}
+      {{- if .Values.global.schedulerName }}
+      schedulerName: {{ .Values.global.schedulerName }}
+      {{- end }}
+      {{- if .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{.Values.terminationGracePeriodSeconds }}
+      {{- end }}
+
+      initContainers:
+      {{- if and (.Values.otk.enabled) (not .Values.database.enabled) }}
+      - name: {{ .Chart.Name }}-otk-install-container
+        image: {{ template "otk.image" . }}
+        imagePullPolicy: {{ .Values.otk.job.image.pullPolicy }}
+        envFrom:
+        - secretRef:
+            name: {{ template "otk.dbSecretName" . }}
+        - secretRef:
+            name: {{ template "gateway.secretName" . }}
+      {{- if and (.Values.otk.database.readOnlyConnection.enabled) (ne .Values.otk.database.type "cassandra") }}
+        - secretRef:
+            name: {{ template "otk.dbSecretName.readOnly" . }}
+      {{- end }}
+        - configMapRef:
+            name: {{ template "gateway.fullname" . }}-otk-install-configmap
+        volumeMounts:
+          - name: {{ template "gateway.fullname" . }}-otk-install-container
+            mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/bundle/000OTK
+          {{- if .Values.otk.customizations.existingBundle.enabled }}
+          {{- range .Values.otk.customizations.existingBundle.configMaps }}
+          - name: {{ .name }}
+            mountPath: /docker/custom_bundles/{{ .name }}
+          {{- end }}
+          {{- range .Values.otk.customizations.existingBundle.secrets }}
+          - name: {{ .name }}
+            mountPath: /docker/custom_bundles/{{ .name }}
+            {{ if .csi }}
+            readOnly: {{ .csi.readOnly }}
+            {{ end }}
+          {{- end }}
+          {{- end }}
+      {{- end }}
+      {{- if .Values.initContainers }}
+      {{toYaml .Values.initContainers | nindent 6 }}
+      {{ end }}
+
+      {{- if .Values.imagePullSecret.enabled }}
+      imagePullSecrets:
+        - name: {{ template "gateway.imagePullSecret" . }}
+      {{- end }}
+      containers:
+        {{- if .Values.sidecars }}
+        {{- toYaml .Values.sidecars | nindent 8 }}
+        {{- end }}
+        - name: {{ .Chart.Name }}
+          image: {{.Values.image.registry}}/{{.Values.image.repository}}:{{.Values.image.tag}}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.containerSecurityContext }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          {{- end }}
+          {{- if .Values.lifecycleHooks }}
+          lifecycle: {{- toYaml .Values.lifecycleHooks | nindent 12 }}
+          {{- else if .Values.installSolutionKits.enabled }}
+          lifecycle:
+            {{- if .Values.preStopScript.enabled }}
+            preStop:
+              exec:
+                command:
+                - /bin/bash
+                - /opt/docker/gracefulshutdown.sh
+                - {{ .Values.preStopScript.timeoutSeconds | quote }}
+                - {{ .Values.preStopScript.periodSeconds | quote }}
+                {{- range .Values.preStopScript.excludedPorts}}
+                - {{ . | quote }}
+                {{- end }}
+            {{- end }}
+            postStart:
+              exec:
+                command:
+                  - '/bin/sh'
+                  - '-c'
+                  - |
+                    declare -i restmanReadyAttempted=0
+                    until [[ "$(curl --user {{ $.Values.management.username }}:{{ $.Values.management.password }} --silent --output /dev/null --write ''%{http_code}'' -k https://127.0.0.1:{{ $.Values.installSolutionKits.restmanPort }}/restman/1.0/doc/)" == "200" ]]; do
+                      if [ "$((++restmanReadyAttempted))" -ge {{ $.Values.installSolutionKits.restmanReadyWaitMaxAttempt }} ]; then
+                        echo "Max restman ready wait attempted (max={{ $.Values.installSolutionKits.restmanReadyWaitMaxAttempt }}, interval={{ $.Values.installSolutionKits.restmanReadyWaitInterval }} )." >&2
+                        exit 1
+                      fi
+                      sleep {{ $.Values.installSolutionKits.restmanReadyWaitInterval }}
+                    done
+                    {{- range .Values.installSolutionKits.solutionKits }}
+                    {{ .preInstallCommand }}
+                    curl --user {{ $.Values.management.username }}:{{ $.Values.management.password }} -k https://127.0.0.1:{{ $.Values.installSolutionKits.restmanPort }}/restman/1.0/solutionKitManagers {{ .param }} --form "file=@/tmp/{{ .file }}"
+                    {{ .postInstallCommand }}
+                    {{- end }}
+          {{- else if .Values.preStopScript.enabled }}
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                - /bin/bash
+                - /opt/docker/gracefulshutdown.sh
+                - {{ .Values.preStopScript.timeoutSeconds | quote }}
+                - {{ .Values.preStopScript.periodSeconds | quote }}
+                {{- range .Values.preStopScript.excludedPorts}}
+                - {{ . | quote }}
+                {{- end }}
+          {{- end }}
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+          ports:
+            {{- range .Values.service.ports }}
+            - name: {{ .name }} 
+              containerPort: {{ .internal }}
+              protocol: {{ .protocol }}
+            {{- end }}
+            {{ if .Values.management.service.enabled}}
+            {{- range .Values.management.service.ports }}
+            - name: {{ .name }} 
+              containerPort: {{ .internal }}
+              protocol: {{ .protocol }}
+            {{- end }}
+            {{ end }}
+          volumeMounts:
+            - name: {{ template "gateway.fullname" . }}-license-xml
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/license/license.xml
+              subPath: license.xml
+            - name: {{ template "gateway.fullname" . }}-system-properties
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/conf/system.properties
+              subPath: system.properties
+{{- if or (.Values.hazelcast.enabled) (.Values.hazelcast.external) }}
+            - name: {{ template "gateway.fullname" . }}-hazelcast-client
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/assertions/ExternalHazelcastSharedStateProviderAssertion/hazelcast-client.xml
+              subPath: hazelcast-client.xml
+{{- end }}
+{{- if .Values.serviceMetrics.enabled }}
+            - name: {{ template "gateway.fullname" . }}-service-metrics-configmap
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/bundle/servicemetrics
+{{- end }}
+{{- if .Values.config.log.override }}
+            - name: {{ template "gateway.fullname" . }}-log-config-override
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/conf/log-override.properties
+              subPath: log-override.properties
+{{- end }}
+{{- if .Values.config.cwp.enabled }}
+            - name: {{ template "gateway.fullname" . }}-cwp-configmap
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/bundle/cwp
+{{- end }}
+{{- if .Values.config.listenPorts.custom.enabled }}
+            - name: {{ template "gateway.fullname" . }}-listenport-configmap
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/bundle/listenports
+{{- end }}
+{{- if .Values.bundle.enabled }}
+            - name: {{ template "gateway.fullname" . }}-bundle-configmap
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/bundle/configmap
+{{- end }}
+{{- if and  (.Values.otk.enabled) (.Values.otk.healthCheckBundle.enabled) (not .Values.otk.healthCheckBundle.useExisting)}}
+            - name: {{ template "gateway.fullname" . }}-{{ .Values.otk.healthCheckBundle.name }}
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/bundle/1otkhealthcheck
+{{- end }}
+{{- if .Values.management.restman.enabled }}
+            - name: {{ template "gateway.fullname" . }}-restman
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/services/restman
+{{- end }}
+{{- if .Values.management.graphman  }}
+        {{- if .Values.management.graphman.enabled }}
+            - name: {{ template "gateway.fullname" . }}-graphman
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/services/graphman
+        {{- end }}
+{{- end }}
+{{- if .Values.config.redis  }}
+        {{- if .Values.config.redis.enabled }}
+            - name: {{ template "gateway.fullname" . }}-redis-properties
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/assertions/RedisSharedStateProviderAssertion/redis.properties
+              subPath: redis.properties
+        {{- if .Values.config.redis.tls.enabled }}
+            - name: {{ template "gateway.fullname" . }}-redis-crt
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/assertions/RedisSharedStateProviderAssertion/redis.crt
+              subPath: redis.crt
+        {{- end }}
+        {{- end }}
+{{- end }}
+{{- if .Values.existingHealthCheck }}
+{{- if .Values.existingHealthCheck.enabled }}
+           {{- if .Values.existingHealthCheck.configMap }}
+            - name: {{ .Values.existingHealthCheck.configMap.name }}
+              mountPath: /opt/docker/rc.d/diagnostic/health_check
+           {{- end }}
+           {{- if .Values.existingHealthCheck.secret }}
+            - name: {{ .Values.existingHealthCheck.secret.name }}
+              mountPath: /opt/docker/rc.d/diagnostic/health_check
+              {{ if .Values.existingHealthCheck.secret.csi }}
+              readOnly: {{ .Values.existingHealthCheck.secret.csi.readOnly }}
+              {{ end }}
+           {{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.customConfig }}
+{{- if .Values.customConfig.enabled }}
+        {{- range .Values.customConfig.mounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+              subPath: {{ .subPath }}
+        {{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.existingBundle.enabled }}
+           {{- range .Values.existingBundle.configMaps }}
+            - name: {{ .name }}
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/bundle/{{ .name }}
+           {{- end }}
+           {{- range .Values.existingBundle.secrets }}
+            - name: {{ .name }}
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/bundle/{{ .name }}
+              {{ if .csi }}
+              readOnly: {{ .csi.readOnly }}
+              {{ end }}
+           {{- end }}
+{{- end }}
+{{- if .Values.management.kubernetes.loadServiceAccountToken }}
+            - name: {{ template "gateway.fullname" . }}-service-account-token-script
+              mountPath: /opt/docker/rc.d/002-load-service-account-token.sh
+              subPath: 002-load-service-account-token.sh
+            - name: {{ template "gateway.fullname" . }}-service-account-token-template
+              mountPath: /opt/docker/rc.d/base/update-service-account-token.xml
+              subPath: update-service-account-token.xml
+{{- end }}
+{{- if .Values.bootstrap }}
+{{- if .Values.bootstrap.script.enabled }}
+            - name: {{ template "gateway.fullname" . }}-parse-custom-files-script
+              mountPath: /opt/docker/rc.d/003-parse-custom-files.sh
+              subPath: 003-parse-custom-files.sh
+{{- end }}
+{{- end }}
+{{- if .Values.preStopScript }}
+{{- if .Values.preStopScript.enabled }}
+            - name: {{ template "gateway.fullname" . }}-gracefulshutdown
+              mountPath: /opt/docker/gracefulshutdown.sh
+              subPath: gracefulshutdown.sh
+{{- end }}
+{{- end }}
+{{- if .Values.initContainers }}
+           {{- range .Values.initContainers }}
+           {{- range .volumeMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+              {{ if .subPath }}
+              subPath: {{ .subPath }}
+              {{ end }}
+           {{- end }}
+           {{- end }}
+{{- end }}
+{{ if and (.Values.otk.enabled) (not .Values.database.enabled) }}
+            - name: {{ template "gateway.fullname" . }}-otk-install-container
+              mountPath: /opt/SecureSpan/Gateway/node/default/etc/bootstrap/bundle/000OTK
+{{- end }}
+{{- if .Values.sidecars }}
+         {{- range .Values.sidecars }}
+         {{- range .volumeMounts }}
+         {{- $vn := .name }}
+         {{ $duplicate := false}}
+         {{- if $.Values.initContainers}}
+           {{- range $_,$ic := $.Values.initContainers }}
+             {{- range $_,$icvm := $ic.volumeMounts }}
+               {{- if eq $vn $icvm.name }}
+                 {{ $duplicate = true}}
+               {{- end }}
+             {{- end }}
+           {{- end }}
+         {{- end }}
+         {{ if not $duplicate }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+              {{ if .subPath }}
+              subPath: {{ .subPath }}
+              {{ end }}
+         {{- end }}
+         {{- end }}
+         {{- end }}
+{{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ template "gateway.fullname" . }}-configmap
+            - secretRef:
+                name: {{ template "gateway.secretName" . }}
+{{- if .Values.tls.useSignedCertificates }}
+            - secretRef:
+                name: {{ template "gateway.tlsSecretName" . }}
+{{- end }}
+
+{{- if .Values.startupProbe.enabled }}
+          startupProbe:
+            {{- if eq .Values.startupProbe.type "httpGet"}}
+            httpGet:
+              path: {{ .Values.startupProbe.path | default "/ssg/ping"}}
+              port: {{ .Values.startupProbe.port | default 8443 }}
+              scheme: {{ .Values.startupProbe.scheme | default "HTTPS" }}
+              httpHeaders:
+              {{- range.Values.startupProbe.httpHeaders }}
+              - name: {{ .name }}
+                value: {{ .value }}
+              {{- end }}
+            {{- else }}
+            exec:
+              command:
+              - /bin/bash
+              - {{ .Values.startupProbe.command | default "/opt/docker/rc.d/diagnostic/health_check.sh" }}
+            {{- end }}
+            initialDelaySeconds: {{ .Values.startupProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.startupProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.startupProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.startupProbe.failureThreshold }}
+            successThreshold: {{ .Values.startupProbe.successThreshold }}
+{{- end }}
+{{- if .Values.livenessProbe.enabled }}
+          livenessProbe:
+{{- if and (.Values.otk.enabled) (.Values.otk.livenessProbe.enabled) }}
+{{- if (eq .Values.otk.livenessProbe.type "httpGet" ) }}
+            httpGet:
+              path: {{ .Values.otk.livenessProbe.httpGet.path | default "/otk/health"}}
+              port: {{ .Values.otk.livenessProbe.httpGet.port | default 8443 }}
+              scheme: {{ .Values.otk.livenessProbe.scheme | default "HTTPS" }}
+{{- else }}
+            exec:
+              command:
+              - curl
+              - --insecure
+              - -X GET
+              - https://127.0.0.1:8443/auth/oauth/health
+{{- end }}
+{{- else if eq .Values.livenessProbe.type "httpGet"}}
+            httpGet:
+              path: {{ .Values.livenessProbe.path | default "/ssg/ping"}}
+              port: {{ .Values.livenessProbe.port | default 8443 }}
+              scheme: {{ .Values.livenessProbe.scheme | default "HTTPS" }}
+              httpHeaders:
+              {{- range.Values.livenessProbe.httpHeaders }}
+              - name: {{ .name }}
+                value: {{ .value }}
+              {{- end }}     
+{{- else }}
+            exec:
+              command:
+              - /bin/bash
+              - {{ .Values.livenessProbe.command | default "/opt/docker/rc.d/diagnostic/health_check.sh" }}
+{{- end }}
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
+            successThreshold: {{ .Values.livenessProbe.successThreshold }}
+{{- end }}
+{{- if .Values.readinessProbe.enabled }}
+          readinessProbe:
+{{- if and (.Values.otk.enabled) (.Values.otk.readinessProbe.enabled) }}
+{{- if (eq .Values.otk.readinessProbe.type "httpGet" ) }}
+            httpGet:
+              path: {{ .Values.otk.readinessProbe.httpGet.path | default "/otk/health"}}
+              port: {{ .Values.otk.readinessProbe.httpGet.port | default 8443 }}
+              scheme: {{ .Values.otk.readinessProbe.scheme | default "HTTPS" }}
+{{- else }}
+            exec:
+              command:
+              - curl
+              - --insecure
+              - -X GET
+              - https://127.0.0.1:8443/auth/oauth/health
+{{- end }}
+{{- else if eq .Values.readinessProbe.type "httpGet"}}
+            httpGet:
+              path: {{ .Values.readinessProbe.path | default "/ssg/ping"}}
+              port: {{ .Values.readinessProbe.port | default 8443 }}
+              scheme: {{ .Values.readinessProbe.scheme | default "HTTPS" }}
+              httpHeaders:
+              {{- range.Values.readinessProbe.httpHeaders }}
+              - name: {{ .name }}
+                value: {{ .value }}
+              {{- end }}
+{{- else }}
+            exec:
+              command:
+              - /bin/bash
+              - {{ .Values.readinessProbe.command | default "/opt/docker/rc.d/diagnostic/health_check.sh" }}
+{{- end }}
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.readinessProbe.failureThreshold }}
+            successThreshold: {{ .Values.readinessProbe.successThreshold }}
+{{- end }}
+{{- if .Values.customHosts.enabled }}
+      hostAliases:
+{{ toYaml .Values.customHosts.hostAliases | indent 12 }}
+{{- end }}
+      volumes:
+        - name: {{ template "gateway.fullname" . }}-license-xml
+          secret:
+            secretName: {{ template "gateway.license" . }}
+            items:
+            - key: license
+              path: license.xml
+        - name: {{ template "gateway.fullname" . }}-system-properties
+          configMap:
+            name: {{ template "gateway.fullname" . }}-configmap
+            items:
+            - key: system-properties
+              path: system.properties
+{{- if or (.Values.hazelcast.enabled) (.Values.hazelcast.external) }}
+        - name: {{ template "gateway.fullname" . }}-hazelcast-client
+          configMap:
+            name: {{ template "gateway.fullname" . }}-configmap
+            items:
+            - key: hazelcast-xml
+              path: hazelcast-client.xml
+{{- end }}
+{{- if .Values.config.redis }}
+       {{- if .Values.config.redis.enabled }}
+        - name: {{ template "gateway.fullname" . }}-redis-properties
+          secret:
+            secretName: {{ template "redisConfigSecretName" . }}
+            items:
+            - key: redis.properties
+              path: redis.properties
+       {{- if .Values.config.redis.tls.enabled }}
+        - name: {{ template "gateway.fullname" . }}-redis-crt
+          secret:
+            secretName: {{ template "redisTlsSecretName" . }}
+            items:
+            - key: tls.crt
+              path: redis.crt
+      {{- end }}
+      {{- end }}
+{{- end }}
+{{- if .Values.customConfig }}
+{{- if .Values.customConfig.enabled }}
+     {{- range .Values.customConfig.mounts }}
+        - name: {{ .name }}
+        {{- if .configMap }}
+          configMap:
+            name: {{ .configMap.name }}
+            items:
+            - key: {{ .configMap.item.key }}
+              path: {{ .configMap.item.path }}
+        {{- else }}
+          secret:
+            secretName: {{ .secret.name }}
+            items:
+            - key: {{ .secret.item.key }}
+              path: {{ .secret.item.path }}
+        {{- end }}
+     {{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.config.log.override }}
+        - name: {{ template "gateway.fullname" . }}-log-config-override
+          configMap:
+            name: {{ template "gateway.fullname" . }}-configmap
+            items:
+            - key: log-override-properties
+              path: log-override.properties
+{{- end }}
+{{- if .Values.config.cwp.enabled }}
+        - name: {{ template "gateway.fullname" . }}-cwp-configmap
+          configMap:
+            defaultMode: 292
+            optional: false
+            name: {{ template "gateway.fullname" . }}-cwp-configmap
+{{- end }}
+{{- if .Values.config.listenPorts.custom.enabled }}
+        - name: {{ template "gateway.fullname" . }}-listenport-configmap
+          configMap:
+            defaultMode: 292
+            optional: false
+            name: {{ template "gateway.fullname" . }}-listenport-configmap
+{{- end }}
+{{- if .Values.bundle.enabled }}
+        - name: {{ template "gateway.fullname" . }}-bundle-configmap
+          configMap:
+            defaultMode: 292
+            optional: false
+            name: {{ template "gateway.fullname" . }}-bundle-configmap
+{{- end }}
+{{- if and  (.Values.otk.enabled) (.Values.otk.healthCheckBundle.enabled) (not .Values.otk.healthCheckBundle.useExisting) }}
+        - name: {{ template "gateway.fullname" . }}-{{ .Values.otk.healthCheckBundle.name }}
+          configMap:
+            defaultMode: 292
+            optional: false
+            name: {{ template "gateway.fullname" . }}-{{ .Values.otk.healthCheckBundle.name }}
+{{- end }}
+{{- if .Values.serviceMetrics.enabled }}
+        - name: {{ template "gateway.fullname" . }}-service-metrics-configmap
+          configMap:
+            defaultMode: 292
+            optional: false
+            name: {{ template "gateway.fullname" . }}-service-metrics-configmap
+{{- end }}
+{{- if .Values.management.restman.enabled }}
+        - name: {{ template "gateway.fullname" . }}-restman
+          emptyDir: {}
+{{- end }}
+{{- if .Values.management.graphman }}
+      {{- if .Values.management.graphman.enabled }}
+        - name: {{ template "gateway.fullname" . }}-graphman
+          emptyDir: {}
+      {{- end }}
+{{- end }}
+{{- if .Values.management.kubernetes.loadServiceAccountToken }}
+        - name: {{ template "gateway.fullname" . }}-service-account-token-script
+          configMap:
+            name: {{ template "gateway.fullname" . }}-configmap
+            items:
+            - key: 002-load-service-account-token
+              path: 002-load-service-account-token.sh
+        - name: {{ template "gateway.fullname" . }}-service-account-token-template
+          configMap:
+            name: {{ template "gateway.fullname" . }}-configmap
+            items:
+            - key: update-service-account-token
+              path: update-service-account-token.xml
+{{- end }}
+{{- if .Values.bootstrap }}
+{{- if .Values.bootstrap.script.enabled }}
+        - name: {{ template "gateway.fullname" . }}-parse-custom-files-script
+          configMap:
+            name: {{ template "gateway.fullname" . }}-configmap
+            items:
+            - key: 003-parse-custom-files
+              path: 003-parse-custom-files.sh
+{{- end }}
+{{- end }}
+{{- if .Values.preStopScript }}
+{{- if .Values.preStopScript.enabled }}
+        - name: {{ template "gateway.fullname" . }}-gracefulshutdown
+          configMap:
+            name: {{ template "gateway.fullname" . }}-configmap
+            items:
+            - key: gracefulshutdown
+              path: gracefulshutdown.sh
+{{- end }}
+{{- end }}
+{{- if .Values.existingBundle.enabled }}
+     {{- range .Values.existingBundle.configMaps }}
+        - name: {{ .name }}
+      {{- if .configMap }}
+          configMap: {{ toYaml .configMap | nindent 12 }}
+      {{- else }}
+          configMap:
+            defaultMode: 292
+            optional: false
+            name: {{ .name }}
+      {{- end }}
+     {{- end }}
+     {{- range .Values.existingBundle.secrets }}
+        - name: {{ .name }}
+      {{- if .csi }}
+          csi: {{ toYaml .csi | nindent 12 }}
+      {{- else }}
+          secret:
+            secretName: {{ .name }}
+      {{- end }}
+     {{- end }}
+{{- end }}
+{{- if .Values.existingHealthCheck }}
+{{- if .Values.existingHealthCheck.enabled }}
+     {{- if .Values.existingHealthCheck.configMap }}
+        - name: {{ .Values.existingHealthCheck.configMap.name }}
+          configMap:
+            defaultMode: {{ .Values.existingHealthCheck.configMap.defaultMode | default 292 }}
+            optional: {{ .Values.existingHealthCheck.configMap.optional | default false }}
+            name: {{ .Values.existingHealthCheck.configMap.name }}
+     {{- end }}
+     {{- if .Values.existingHealthCheck.secret }}
+        - name: {{ .Values.existingHealthCheck.secret.name }}
+      {{- if .Values.existingHealthCheck.secret.csi }}
+          csi: {{ toYaml .Values.existingHealthCheck.secret.csi | nindent 12 }}
+      {{- else }}
+          secret:
+            secretName: {{ .Values.existingHealthCheck.secret.name }}
+      {{- end }}
+     {{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.initContainers }}
+     {{- range .Values.initContainers }}
+     {{- $cvIndex := 0 }}
+     {{- range .volumeMounts }}
+       {{- $vn := .name }}
+       {{- $found := false }}
+       {{- $cvIndex = 0 }}
+       {{- if $.Values.customInitVolumes }}
+       {{- range $i,$cv := $.Values.customInitVolumes }}
+       {{- if eq $vn $cv.name }}
+        {{- $found = true }}
+        {{- $cvIndex = $i }}
+       {{- end }}
+       {{- end }}
+       {{- end }}
+       {{- if eq $found true }}
+        {{- with (index $.Values.customInitVolumes $cvIndex) }}
+        - {{- toYaml . | nindent 10}}
+        {{- end }}
+      {{- else }}
+        - name: {{ $vn }}
+          emptyDir: {}
+      {{- end }}
+     {{- end }}
+     {{- end }}
+{{- end }}
+{{ if and (.Values.otk.enabled) (not .Values.database.enabled) }}
+        - name: {{ template "gateway.fullname" . }}-otk-install-container
+          emptyDir: {}
+        {{- if .Values.otk.customizations.existingBundle.enabled }}
+        {{- range .Values.otk.customizations.existingBundle.configMaps }}
+        - name: {{ .name }}
+        {{- if .configMap }}
+          configMap: {{ toYaml .configMap | nindent 12 }}
+        {{- else }}
+          configMap:
+            defaultMode: 292
+            optional: false
+            name: {{ .name }}
+          {{- end }}
+        {{- end }}        
+        {{- range .Values.otk.customizations.existingBundle.secrets }}
+        - name: {{ .name }}
+          {{- if .csi }}
+          csi: {{ toYaml .csi | nindent 12 }}
+          {{- else }}
+          secret:
+            secretName: {{ .name }}
+          {{- end }}
+        {{- end }}
+        {{- end }}  
+{{- end }}
+{{- if .Values.sidecars }}
+     {{- range .Values.sidecars }}
+     {{- $cvIndex := 0 }}
+     {{- range .volumeMounts }}
+       {{- $vn := .name }}
+       {{- $found := false }}
+       {{- $duplicate := false }}
+       {{- $cvIndex = 0 }}
+      {{- if $.Values.initContainers }}
+        {{- range  $_,$ic :=  $.Values.initContainers }}
+          {{- range $_,$icvm :=  $ic.volumeMounts }}
+            {{- if eq $vn $icvm.name }}
+              {{- $duplicate = true }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+       {{- if $.Values.customSideCarVolumes }}
+         {{- range $i,$cv := $.Values.customSideCarVolumes }}
+         {{- if eq $vn $cv.name }}
+           {{- $found = true }}
+           {{- $cvIndex = $i }}
+         {{- end }}
+         {{- end }}
+       {{- end }}
+       {{- if not $duplicate }}
+       {{- if $found }}
+        {{- with (index $.Values.customSideCarVolumes $cvIndex) }}
+        - {{- toYaml . | nindent 10}}
+        {{- end }}
+      {{- else }}
+        - name: {{ $vn }}
+          emptyDir: {}
+      {{- end }}
+     {{- end }}
+     {{- end }}
+     {{- end }}
+{{- end }}

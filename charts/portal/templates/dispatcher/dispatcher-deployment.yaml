@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dispatcher
+  labels:
+    app: dispatcher
+    chart: {{ template "portal.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    {{- range $key, $val := .Values.global.additionalLabels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+    {{- range $key, $val := .Values.dispatcher.additionalLabels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+spec:
+  {{- if .Values.dispatcher.strategy }}
+  strategy: {{- toYaml .Values.dispatcher.strategy | nindent 12 }}
+  {{- end }}
+  replicas: {{ .Values.dispatcher.replicaCount }}
+  selector:
+    matchLabels:
+      app: dispatcher
+  template:
+    metadata:
+      labels:
+        app: dispatcher
+      {{ if .Values.dispatcher.forceRedeploy }}
+      annotations:
+        timestamp: {{ now | quote }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "portal.serviceAccountName" . }}
+      {{- if .Values.dispatcher.affinity }}
+      affinity: {{- toYaml .Values.dispatcher.affinity | nindent 12 }}
+      {{- end }}
+      {{- if .Values.dispatcher.nodeSelector }}
+      nodeSelector: {{- toYaml .Values.dispatcher.nodeSelector | nindent 12 }}
+      {{- end }}
+      {{- if .Values.dispatcher.tolerations }}
+      tolerations: {{- toYaml .Values.dispatcher.tolerations | nindent 12 }}
+      {{- end }}
+      {{- if .Values.global.schedulerName }}
+      schedulerName: "{{ .Values.global.schedulerName }}"
+      {{- end }}
+      {{- if .Values.dispatcher.podSecurityContext }}
+      securityContext: {{- toYaml .Values.dispatcher.podSecurityContext | nindent 12 }}
+      {{- else if .Values.global.podSecurityContext }}
+      securityContext: {{- toYaml .Values.global.podSecurityContext | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: dispatcher
+          image: "{{ .Values.global.portalRepository }}{{ .Values.image.dispatcher }}"
+          imagePullPolicy: "{{ .Values.dispatcher.image.pullPolicy }}"
+          {{- if .Values.dispatcher.containerSecurityContext }}
+          securityContext: {{- toYaml .Values.dispatcher.containerSecurityContext | nindent 12 }}
+          {{- else if .Values.global.containerSecurityContext }}
+          securityContext: {{- toYaml .Values.global.containerSecurityContext | nindent 12 }}
+          {{- end }}
+          env:
+          - name: HTTPD_SSL_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.tls.externalSecretName }}
+                key: dispatcher-ssl.p12
+                optional: false
+          - name: HTTPD_SSL_KEY_PASS
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.tls.externalSecretName }}
+                key: keypass.txt
+                optional: false
+          - name: RABBITMQ_DEFAULT_PASS
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.rabbitmq.auth.secretName }}
+                key: rabbitmq-password
+          envFrom:
+          - configMapRef:
+              name: dispatcher-config
+          - secretRef:
+              name: dispatcher-secret
+          {{- if .Values.dispatcher.readinessProbe }}
+          readinessProbe: {{- toYaml .Values.dispatcher.readinessProbe | nindent 12 }}
+          {{- else }}
+          readinessProbe:
+             httpGet:
+                path: /nginx_status
+                port: 8443
+                scheme: HTTPS
+             initialDelaySeconds: 30
+             timeoutSeconds: 5
+             periodSeconds: 15
+             successThreshold: 1
+             failureThreshold: 20
+          {{- end }}
+          {{- if .Values.dispatcher.livenessProbe }}
+          livenessProbe: {{- toYaml .Values.dispatcher.livenessProbe | nindent 12 }}
+          {{- else }}
+          livenessProbe:
+             httpGet:
+                path: /nginx_status
+                port: 8443
+                scheme: HTTPS
+             initialDelaySeconds: 30
+             timeoutSeconds: 5
+             periodSeconds: 15
+             successThreshold: 1
+             failureThreshold: 20
+          {{- end}}
+          {{- if .Values.dispatcher.resources }}
+          resources: {{- toYaml .Values.dispatcher.resources | nindent 12 }}
+          {{- end }}
+      {{- if .Values.global.pullSecret }}
+      imagePullSecrets:
+      - name: "{{ .Values.global.pullSecret }}"
+      {{- end }}
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 60

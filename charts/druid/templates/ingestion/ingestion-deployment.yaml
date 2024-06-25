@@ -1,0 +1,106 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingestion-server
+  labels:
+    app: ingestion-server
+    chart: {{ template "druid.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    {{- range $key, $val := .Values.global.additionalLabels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+    {{- range $key, $val := .Values.ingestion.additionalLabels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  replicas: {{ .Values.ingestion.replicaCount }}
+  selector:
+    matchLabels:
+      app: ingestion-server
+  template:
+    metadata:
+      labels:
+        app: ingestion-server
+      {{ if .Values.forceRedeploy }}
+      annotations:
+        timestamp: {{ now | quote }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "druid.serviceAccountName" . }}
+      {{- if .Values.ingestion.affinity }}
+      affinity: {{- toYaml .Values.ingestion.affinity | nindent 12 }}
+      {{- end }}
+      {{- if .Values.ingestion.nodeSelector }}
+      nodeSelector: {{- toYaml .Values.ingestion.nodeSelector | nindent 12 }}
+      {{- end }}
+      {{- if .Values.ingestion.tolerations }}
+      tolerations: {{- toYaml .Values.ingestion.tolerations | nindent 12 }}
+      {{- end }}
+      {{- if .Values.ingestion.podSecurityContext }}
+      securityContext: {{- toYaml .Values.ingestion.podSecurityContext | nindent 12 }}
+      {{- else if .Values.global.podSecurityContext }}
+      securityContext: {{- toYaml .Values.global.podSecurityContext | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: ingestion-server
+          image: "{{ .Values.global.portalRepository }}{{ .Values.image.ingestion }}"
+          imagePullPolicy: "{{ .Values.ingestion.image.pullPolicy }}"
+          {{- if .Values.ingestion.containerSecurityContext }}
+          securityContext: {{- toYaml .Values.ingestion.containerSecurityContext | nindent 12 }}
+          {{- else if .Values.global.containerSecurityContext }}
+          securityContext: {{- toYaml .Values.global.containerSecurityContext | nindent 12 }}
+          {{- end }}
+          env:
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.minio.auth.secretName }}
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.minio.auth.secretName }}
+                  key: MINIO_SECRET_KEY
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.databaseSecret }}
+            {{ if eq .Values.global.databaseType "mysql" }}
+                  key: mysql-password
+            {{ end }}        
+          envFrom:
+          - configMapRef:
+              name: ingestion-server-config
+          - secretRef:
+              name: ingestion-server-secret
+          readinessProbe:
+            exec:
+              command: [sh, /opt/app/diagnostic/health_check.sh]
+            initialDelaySeconds: 90
+            timeoutSeconds: 1
+            periodSeconds: 15
+            successThreshold: 1
+          livenessProbe:
+            exec:
+              command: [sh, /opt/app/diagnostic/health_check.sh]
+            initialDelaySeconds: 120
+            timeoutSeconds: 1
+            periodSeconds: 15
+            successThreshold: 1
+          {{- if .Values.ingestion.resources }}
+          resources: {{- toYaml .Values.ingestion.resources | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: 9042
+      {{- if .Values.global.pullSecret }}
+      imagePullSecrets:
+      - name: "{{ .Values.global.pullSecret }}"
+      {{- end }}
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30

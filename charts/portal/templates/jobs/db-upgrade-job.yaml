@@ -1,0 +1,73 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-upgrade
+  annotations:
+    chartversion: {{ .Chart.AppVersion | quote }}
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-4"
+  labels:
+    app: {{ template "portal.name" . }}
+    chart: {{ template "portal.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    {{- range $key, $val := .Values.global.additionalLabels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+    {{- range $key, $val := .Values.jobs.labels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      serviceAccountName: {{ include "portal.serviceAccountName" . }}
+      {{- if .Values.global.podSecurityContext }}
+      securityContext: {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: db-upgrade
+          image: "{{ .Values.global.portalRepository }}{{ .Values.image.dbUpgrade }}"
+          imagePullPolicy: {{ .Values.jobs.image.pullPolicy }}
+          {{- if .Values.global.containerSecurityContext }}
+          securityContext: {{- toYaml .Values.global.containerSecurityContext | nindent 12 }}
+          {{- end }}
+          env:
+           - name: HOST
+         {{ if .Values.global.setupDemoDatabase }}
+             value: {{ .Release.Name }}-{{ .Values.global.databaseHost }}
+        {{ else }}
+             value: {{ .Values.global.databaseHost | quote }}
+        {{ end }}
+           - name: DATABASE_NAME
+             value: {{ include "portal-db-name" . | quote }}
+           - name: PASSWORD
+             valueFrom:
+               secretKeyRef:
+                 name: {{ .Values.global.databaseSecret }}
+            {{ if eq .Values.global.databaseType "mysql" }}
+                 key: mysql-password
+            {{ end }}
+           - name: PORT
+             value: {{ include "database-port" . | quote }}
+           - name: LISTEN_PORT
+             value: "8080"
+           - name: USERNAME
+             value: {{ required "Please fill in databaseUsername in values.yaml" .Values.global.databaseUsername | quote }}
+           - name: DATABASE_TYPE
+             value: {{ required "Please fill in databaseType in values.yaml" .Values.global.databaseType | quote }}
+           - name: CREATE_DATABASE
+             value: "true"
+           - name: TSSG_TENANT_ID
+             value: {{ include "default-tenant-id" . | quote }}
+      {{- if .Values.global.pullSecret }}
+      imagePullSecrets:
+      - name: "{{ .Values.global.pullSecret }}"
+      {{- end }}
+      {{- if .Values.jobs.nodeSelector }}
+      nodeSelector: {{- toYaml .Values.jobs.nodeSelector | nindent 12 }}
+      {{- end }}
+      {{- if .Values.jobs.tolerations }}
+      tolerations: {{- toYaml .Values.jobs.tolerations | nindent 12 }}
+      {{- end }}
+      restartPolicy: "OnFailure"

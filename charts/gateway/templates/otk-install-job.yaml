@@ -1,0 +1,118 @@
+{{ if and (.Values.management.restman.enabled) (.Values.otk.enabled) (.Values.database.enabled)}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ template "gateway.fullname" . }}-otk-install
+  annotations:
+    chartversion: {{ .Chart.AppVersion | quote }}
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-4"
+    {{- if  .Values.additionalAnnotations }}
+    {{- range $key, $val := .Values.additionalAnnotations }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+    {{- end }}
+  labels:
+    app: {{ template "gateway.fullname" . }}
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    {{- range $key, $val := .Values.otk.job.labels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+    {{- range $key, $val := .Values.additionalLabels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: {{ template "gateway.fullname" . }}
+        release: {{ .Release.Name }}
+    {{- if  .Values.otk.job.podLabels }}
+        {{- toYaml .Values.otk.job.podLabels | nindent 8 }}
+    {{- end }}
+    {{- if  .Values.otk.job.podAnnotations }}
+      annotations: {{- toYaml .Values.otk.job.podAnnotations | nindent 8 }}
+    {{- end }}
+    spec:
+      serviceAccountName: {{ include "gateway.serviceAccountName" . }}
+      {{- if .Values.podSecurityContext }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: otk-install
+          image: {{ template "otk.image" . }}
+          imagePullPolicy: {{ .Values.otk.job.image.pullPolicy }}
+          {{- if .Values.containerSecurityContext }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+          {{- if .Values.otk.customizations.existingBundle.enabled }}
+          {{- range .Values.otk.customizations.existingBundle.configMaps }}
+          - name: {{ .name }}
+            mountPath: /docker/custom_bundles/{{ .name }}
+          {{- end }}
+          {{- range .Values.otk.customizations.existingBundle.secrets }}
+          - name: {{ .name }}
+            mountPath: /docker/custom_bundles/{{ .name }}
+            {{ if .csi }}
+            readOnly: {{ .csi.readOnly }}
+            {{ end }}
+          {{- end }}
+          {{- end }}
+
+          resources: {{- toYaml .Values.otk.job.resources | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: {{ template "otk.dbSecretName" . }}
+            - secretRef:
+                name: {{ template "gateway.secretName" . }}
+            {{- if and (.Values.otk.database.readOnlyConnection.enabled) (ne .Values.otk.database.type "cassandra") }}
+            - secretRef:
+                name: {{ template "otk.dbSecretName.readOnly" . }}
+            {{ end }}
+            - configMapRef:
+                name: {{ template "gateway.fullname" . }}-otk-install-configmap
+
+      volumes:
+        {{- if .Values.otk.customizations.existingBundle.enabled }}
+        {{- range .Values.otk.customizations.existingBundle.configMaps }}
+        - name: {{ .name }}
+        {{- if .configMap }}
+          configMap: {{ toYaml .configMap | nindent 12 }}
+        {{- else }}
+          configMap:
+            defaultMode: 292
+            optional: false
+            name: {{ .name }}
+          {{- end }}
+        {{- end }}
+        {{- range .Values.otk.customizations.existingBundle.secrets }}
+        - name: {{ .name }}
+          {{- if .csi }}
+          csi: {{ toYaml .csi | nindent 12 }}
+          {{- else }}
+          secret:
+            secretName: {{ .name }}
+          {{- end }}
+        {{- end }}
+        {{- end }}
+
+      {{- if .Values.otk.job.nodeSelector }}
+      nodeSelector: {{- toYaml .Values.otk.job.nodeSelector | nindent 8 }}
+      {{- end }}
+
+      {{- if or (.Values.imagePullSecret.enabled) (.Values.otk.job.imagePullSecret.enabled) }}
+      imagePullSecrets:
+        - name: {{ template "otk.imagePullSecret" . }}
+      {{- end }}
+
+      {{- if .Values.otk.job.tolerations }}
+      tolerations: {{- toYaml .Values.otk.job.tolerations | nindent 8 }}
+      {{- end }}
+
+      restartPolicy: "Never"
+
+{{ end }}

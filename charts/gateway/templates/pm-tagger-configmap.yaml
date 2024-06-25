@@ -1,0 +1,27 @@
+{{ if .Values.pmtagger.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "gateway.fullname" . }}-pm-tagger-configmap
+  labels:
+    app: {{ template "gateway.name" . }}
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    {{- range $key, $val := .Values.additionalLabels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+  {{- if  .Values.additionalAnnotations }}
+  annotations:
+{{- range $key, $val := .Values.additionalAnnotations }}
+    {{ $key }}: "{{ $val }}"
+{{- end }}
+{{- end }}
+data:
+  config.yaml: |
+    version: {{ .Values.pmtagger.image.tag }}
+    namespace: {{ .Release.Namespace }}
+    labels:
+      app: {{ template "gateway.fullname" . }}
+      release: {{ .Release.Name }}
+{{ end }}

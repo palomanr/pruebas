@@ -1,0 +1,177 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portal-data
+  labels:
+    app: portal-data
+    chart: {{ template "portal.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    {{- range $key, $val := .Values.global.additionalLabels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+    {{- range $key, $val := .Values.portalData.additionalLabels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+spec:
+  {{- if .Values.portalData.strategy }}
+  strategy: {{- toYaml .Values.portalData.strategy | nindent 12 }}
+  {{- end }}
+  replicas: {{ .Values.portalData.replicaCount }}
+  selector:
+    matchLabels:
+      app: portal-data
+  template:
+    metadata:
+      labels:
+        app: portal-data
+      {{ if .Values.portalData.forceRedeploy }}
+      annotations:
+        timestamp: {{ now | quote }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "portal.serviceAccountName" . }}
+      {{- if .Values.portalData.affinity }}
+      affinity: {{- toYaml .Values.portalData.affinity | nindent 12 }}
+      {{- end }}
+      {{- if .Values.portalData.nodeSelector }}
+      nodeSelector: {{- toYaml .Values.portalData.nodeSelector | nindent 12 }}
+      {{- end }}
+      {{- if .Values.portalData.tolerations }}
+      tolerations: {{- toYaml .Values.portalData.tolerations | nindent 12 }}
+      {{- end }}
+      {{- if .Values.global.schedulerName }}
+      schedulerName: "{{ .Values.global.schedulerName }}"
+      {{- end }}
+      {{- if .Values.portalData.podSecurityContext }}
+      securityContext: {{- toYaml .Values.portalData.podSecurityContext | nindent 12 }}
+      {{- else if .Values.global.podSecurityContext }}
+      securityContext: {{- toYaml .Values.global.podSecurityContext | nindent 12 }}
+      {{- end }}
+      initContainers:
+        - name: liquidbase-upgrade-portal
+          image: "{{ .Values.global.portalRepository }}{{ .Values.image.upgradeVerify }}"
+          args: ["job", 'db-upgrade']
+        - name: liquidbase-upgrade-rbac
+          image: "{{ .Values.global.portalRepository }}{{ .Values.image.upgradeVerify }}"
+          args: ["job", 'rbac-upgrade']
+      containers:
+        - name: portal-data
+          image: "{{ .Values.global.portalRepository }}{{ .Values.image.data }}"
+          imagePullPolicy: "{{ .Values.portalData.image.pullPolicy }}"
+          {{- if .Values.portalData.containerSecurityContext }}
+          securityContext: {{- toYaml .Values.portalData.containerSecurityContext | nindent 12 }}
+          {{- else if .Values.global.containerSecurityContext }}
+          securityContext: {{- toYaml .Values.global.containerSecurityContext | nindent 12 }}
+          {{- end }}
+          env:
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.rabbitmq.auth.secretName }}
+                  key: rabbitmq-password
+            - name: RABBITMQ_ERLANG_COOKIE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.rabbitmq.auth.secretName }}
+                  key:  rabbitmq-erlang-cookie
+            - name: PAPI_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.portal.papi.secretName }}
+                  key: papi-username
+            - name: PAPI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.portal.papi.secretName }}
+                  key: papi-password
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.databaseSecret }}
+            {{ if eq .Values.global.databaseType "mysql" }}
+                  key: mysql-password
+            {{ end }}
+            - name: RBAC_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.databaseSecret }}
+            {{ if eq .Values.global.databaseType "mysql" }}
+                  key: mysql-password
+            {{ end }}
+            - name: APIM_SSL_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.tls.externalSecretName }}
+                  key: apim-ssl.p12
+                  optional: false
+            - name: DSSG_SSL_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.tls.internalSecretName }}
+                  key: apim-dssg.p12
+                  optional: false
+            - name: PSSG_SSL_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.tls.internalSecretName }}
+                  key: pssg-ssl.p12
+                  optional: false
+            - name: APIM_SSL_KEY_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.tls.externalSecretName }}
+                  key: keypass.txt
+                  optional: false
+            - name: DSSG_SSL_KEY_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.tls.internalSecretName }}
+                  key: keypass.txt
+                  optional: false
+            - name: PSSG_SSL_KEY_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.tls.internalSecretName }}
+                  key: keypass.txt
+                  optional: false
+            # test only variables
+            - name: RBAC_CLIENT_CACHE_EXPIRY
+              value: "{{ .Values.portalData.RBAC_CLIENT_CACHE_EXPIRY }}"
+            - name: THEME_CACHE_EXPIRY
+              value: "{{ .Values.portalData.THEME_CACHE_EXPIRY }}"
+          envFrom:
+          - configMapRef:
+              name: portal-data-config
+          - secretRef:
+              name: portal-data-secret
+              optional: true
+          readinessProbe:
+            exec:
+              command:
+                - livenesscheck
+            initialDelaySeconds: 60
+            timeoutSeconds: 1
+            periodSeconds: 15
+            successThreshold: 1
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command:
+                - livenesscheck
+            initialDelaySeconds: 60
+            timeoutSeconds: 1
+            periodSeconds: 15
+            successThreshold: 1
+            failureThreshold: 30
+          ports:
+            - containerPort: 8080
+          {{- if .Values.portalData.resources }}
+          resources: {{- toYaml .Values.portalData.resources | nindent 12 }}
+          {{- end }}
+      {{- if .Values.global.pullSecret }}
+      imagePullSecrets:
+      - name: "{{ .Values.global.pullSecret }}"
+      {{- end }}
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 60

@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authenticator
+  labels:
+    app: authenticator
+    chart: {{ template "portal.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    {{- range $key, $val := .Values.global.additionalLabels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+    {{- range $key, $val := .Values.authenticator.additionalLabels }}
+    {{ $key }}: "{{ $val }}"
+    {{- end }}
+spec:
+  {{- if .Values.authenticator.strategy }}
+  strategy: {{- toYaml .Values.authenticator.strategy | nindent 12 }}
+  {{- end }}
+  replicas: {{ .Values.authenticator.replicaCount }}
+  selector:
+    matchLabels:
+      app: authenticator
+  template:
+    metadata:
+      labels:
+        app: authenticator
+      {{ if .Values.authenticator.forceRedeploy }}
+      annotations:
+        timestamp: {{ now | quote }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "portal.serviceAccountName" . }}
+      {{- if .Values.authenticator.affinity }}
+      affinity: {{- toYaml .Values.authenticator.affinity | nindent 12 }}
+      {{- end }}
+      {{- if .Values.authenticator.nodeSelector }}
+      nodeSelector: {{- toYaml .Values.authenticator.nodeSelector | nindent 12 }}
+      {{- end }}
+      {{- if .Values.authenticator.tolerations }}
+      tolerations: {{- toYaml .Values.authenticator.tolerations | nindent 12 }}
+      {{- end }}
+      {{- if .Values.global.schedulerName }}
+      schedulerName: "{{ .Values.global.schedulerName }}"
+      {{- end }}
+      {{- if .Values.authenticator.podSecurityContext }}
+      securityContext: {{- toYaml .Values.authenticator.podSecurityContext | nindent 12 }}
+      {{- else if .Values.global.podSecurityContext }}
+      securityContext: {{- toYaml .Values.global.podSecurityContext | nindent 12 }}
+      {{- end }}
+      initContainers:
+        - name: liquidbase-upgrade-portal
+          image: "{{ .Values.global.portalRepository }}{{ .Values.image.upgradeVerify }}"
+          args: ["job", 'db-upgrade']
+        - name: liquidbase-upgrade-rbac
+          image: "{{ .Values.global.portalRepository }}{{ .Values.image.upgradeVerify }}"
+          args: ["job", 'rbac-upgrade']
+      containers:
+        - name: authenticator
+          image: "{{ .Values.global.portalRepository }}{{ .Values.image.authenticator }}"
+          imagePullPolicy: "{{ .Values.authenticator.image.pullPolicy }}"
+          {{- if .Values.authenticator.containerSecurityContext }}
+          securityContext: {{- toYaml .Values.authenticator.containerSecurityContext | nindent 12 }}
+          {{- else if .Values.global.containerSecurityContext }}
+          securityContext: {{- toYaml .Values.global.containerSecurityContext | nindent 12 }}
+          {{- end }}
+          env:
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.rabbitmq.auth.secretName }}
+                  key: rabbitmq-password
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.databaseSecret }}
+            {{ if eq .Values.global.databaseType "mysql" }}
+                  key: mysql-password
+            {{ end }}
+          envFrom:
+          - configMapRef:
+              name: authenticator-config
+          - secretRef:
+              name: authenticator-secret
+          readinessProbe:
+            exec:
+              command: ["sh", "/opt/app/diagnostic/health_check.sh"]
+            initialDelaySeconds: 90
+            timeoutSeconds: 1
+            periodSeconds: 15
+            successThreshold: 1
+            failureThreshold: 10
+          livenessProbe:
+            exec:
+              command: ["sh", "/opt/app/diagnostic/health_check.sh"]
+            initialDelaySeconds: 90
+            timeoutSeconds: 1
+            periodSeconds: 15
+            successThreshold: 1
+            failureThreshold: 10
+          {{- if .Values.authenticator.resources }}
+          resources: {{- toYaml .Values.authenticator.resources | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: 9081
+      {{- if .Values.global.pullSecret }}
+      imagePullSecrets:
+      - name: "{{ .Values.global.pullSecret }}"
+      {{- end }}
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 60
