@@ -433,11 +433,11 @@ config:
       enabled: true
       existingSecret: ""
       verifyPeer: true
-      # redisCrt: |+
-      #   -----BEGIN CERTIFICATE-----
-      #   MIIEGzCCAwOgAwIBAgIRANzOj1Mgxk7VRFClPaQnUGgwDQYJKoZIhvcNAQELBQAw
-      #   ....
-      #   -----END CERTIFICATE-----
+      redisCrt: |+
+        -----BEGIN CERTIFICATE-----
+        MIIEGzCCAwOgAwIBAgIRANzOj1Mgxk7VRFClPaQnUGgwDQYJKoZIhvcNAQELBQAw
+        ....
+        -----END CERTIFICATE-----
     # Enable subChart to have Helm optionally deploy Redis Sentinel/Standalone with your gateways.
     subChart:
       # If the subChart is enabled, configuration from redis in the subCharts section
